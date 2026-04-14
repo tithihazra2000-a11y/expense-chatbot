@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Message from './Message'
 
 export default function Chat() {
   const [messages, setMessages] = useState<any[]>([])
@@ -7,7 +8,8 @@ export default function Chat() {
   const sendMessage = async () => {
     if (!input) return
 
-    setMessages(prev => [...prev, { text: input, sender: 'user' }])
+    const userMsg = { text: input, sender: 'user' }
+    setMessages(prev => [...prev, userMsg])
 
     try {
       const res = await fetch('https://expense-chatbot-api.onrender.com/chat', {
@@ -18,47 +20,33 @@ export default function Chat() {
 
       const data = await res.json()
 
-      setMessages(prev => [...prev, { text: data.reply, sender: 'bot' }])
+      setMessages(prev => [
+        ...prev,
+        { text: data.reply, sender: 'bot' }
+      ])
+
     } catch {
-      setMessages(prev => [...prev, { text: 'Error ❌', sender: 'bot' }])
+      setMessages(prev => [
+        ...prev,
+        { text: 'Server error ❌', sender: 'bot' }
+      ])
     }
 
     setInput('')
   }
 
   return (
-    <div style={{
-      width: 400,
-      margin: '20px auto',
-      background: 'white',
-      padding: 15,
-      borderRadius: 10
-    }}>
-      <div style={{ height: 250, overflowY: 'auto' }}>
-        {messages.map((m, i) => (
-          <div key={i} style={{
-            textAlign: m.sender === 'user' ? 'right' : 'left'
-          }}>
-            <span style={{
-              background: m.sender === 'user' ? '#6c5ce7' : '#dfe6e9',
-              color: m.sender === 'user' ? 'white' : 'black',
-              padding: '5px 10px',
-              borderRadius: 10,
-              display: 'inline-block',
-              margin: 5
-            }}>
-              {m.text}
-            </span>
-          </div>
-        ))}
-      </div>
+    <div style={{ marginTop: 20 }}>
+      {messages.map((msg, i) => (
+        <Message key={i} text={msg.text} sender={msg.sender} />
+      ))}
 
       <input
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-        placeholder="Type expense..."
       />
+
       <button onClick={sendMessage}>Send</button>
     </div>
   )
