@@ -1,34 +1,40 @@
 import { useEffect, useState } from 'react'
 
 export default function Dashboard() {
-  const [data, setData] = useState<any[]>([])
+  const [expenses, setExpenses] = useState<any[]>([])
+
+  const fetchExpenses = async () => {
+    try {
+      const res = await fetch('https://expense-chatbot-api.onrender.com/expenses')
+      const data = await res.json()
+      setExpenses(data)
+    } catch (err) {
+      console.log(err)
+    }
+  }
 
   useEffect(() => {
-    fetch('https://expense-chatbot-api.onrender.com/expenses')
-      .then(res => res.json())
-      .then(res => {
-        setData(res || [])
-      })
-      .catch(() => {
-        setData([])
-      })
+    fetchExpenses()
   }, [])
 
   return (
     <div style={{ marginTop: 20 }}>
       <h2>📊 Expenses</h2>
 
-      {data.length === 0 ? (
+      {expenses.length === 0 ? (
         <p>No expenses yet</p>
       ) : (
-        data.map((item, i) => (
-          <div key={i} style={{
-            background: '#eee',
-            padding: '8px',
-            margin: '5px',
-            borderRadius: '6px'
-          }}>
-            ₹{item.amount} - {item.category}
+        expenses.map((e, i) => (
+          <div
+            key={i}
+            style={{
+              background: '#eee',
+              padding: '10px',
+              margin: '5px 0',
+              borderRadius: '8px'
+            }}
+          >
+            ₹{e.amount} - {e.category}
           </div>
         ))
       )}
