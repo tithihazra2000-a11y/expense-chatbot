@@ -4,9 +4,9 @@ import Dashboard from './components/Dashboard'
 
 export default function App() {
   const [user, setUser] = useState('')
-  const [input, setInput] = useState('')
+  const [name, setName] = useState('')
 
-  // 🔐 LOGIN SCREEN
+  // LOGIN SCREEN
   if (!user) {
     return (
       <div style={{
@@ -20,16 +20,16 @@ export default function App() {
           <h2>Login</h2>
           <input
             placeholder="Enter your name"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
           />
-          <button onClick={() => setUser(input)}>Enter</button>
+          <button onClick={() => setUser(name)}>Enter</button>
         </div>
       </div>
     )
   }
 
-  // 🏠 MAIN APP
+  // MAIN UI
   return (
     <div style={{
       minHeight: '100vh',
