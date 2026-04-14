@@ -7,76 +7,80 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
-// 🔑 Supabase
 const supabase = createClient(
   'https://csokppzlfcdhzrvdnqvr.supabase.co',
   'sb_publishable_-hzP-OQaNrO-2IVdQ2ahCA_n1xPgM-J'
 )
 
-// ✅ TEST ROUTE
 app.get('/', (req, res) => {
-  res.send('API is running 🚀')
+  res.send('API running 🚀')
 })
 
-// 💬 CHAT ROUTE
 app.post('/chat', async (req, res) => {
   try {
     const text = req.body.message?.toLowerCase() || ''
 
-    console.log("Incoming:", text)
+    // SHOW
+    if (text.includes('show')) {
+      const { data } = await supabase.from('expenses').select('*')
 
+      if (!data.length) {
+        return res.json({ reply: 'No expenses yet' })
+      }
+
+      return res.json({
+        reply: data.map(e => `${e.category} - ₹${e.amount}`).join('\n')
+      })
+    }
+
+    // TOTAL
+    if (text.includes('total')) {
+      const { data } = await supabase.from('expenses').select('amount')
+      const total = data.reduce((sum, e) => sum + e.amount, 0)
+
+      return res.json({ reply: `Total: ₹${total}` })
+    }
+
+    // DELETE
+    if (text.includes('delete')) {
+      const { data } = await supabase
+        .from('expenses')
+        .select('*')
+        .order('id', { ascending: false })
+        .limit(1)
+
+      if (!data.length) {
+        return res.json({ reply: 'Nothing to delete' })
+      }
+
+      await supabase.from('expenses').delete().eq('id', data[0].id)
+
+      return res.json({ reply: 'Deleted last expense' })
+    }
+
+    // ADD
     const amount = text.match(/\d+/)?.[0]
 
     let category = 'Other'
-    if (text.includes('food')) category = 'Food'
-    if (text.includes('travel')) category = 'Travel'
+    if (text.includes('food') || text.includes('pizza')) category = 'Food'
+    if (text.includes('travel') || text.includes('uber')) category = 'Travel'
 
     if (!amount) {
       return res.json({ reply: 'Try: Spent 200 on food' })
     }
 
-    const { error } = await supabase.from('expenses').insert([
+    await supabase.from('expenses').insert([
       { amount: Number(amount), category }
     ])
 
-    if (error) {
-      console.log("DB ERROR:", error)
-      return res.json({ reply: 'Database error ❌' })
-    }
-
     return res.json({
-      reply: `Saved ₹${amount} for ${category} ✅`
+      reply: `Saved ₹${amount} for ${category}`
     })
 
   } catch (err) {
-    console.log("SERVER ERROR:", err)
-    return res.json({ reply: 'Server crashed ❌' })
+    return res.json({ reply: 'Server error' })
   }
 })
 
-// 📊 GET EXPENSES
-app.get('/expenses', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('expenses')
-      .select('*')
-
-    if (error) {
-      console.log(error)
-      return res.json({ error: 'Error fetching data' })
-    }
-
-    return res.json(data)
-
-  } catch (err) {
-    console.log(err)
-    return res.json({ error: 'Server error' })
-  }
-})
-
-// 🚀 IMPORTANT FIX (Render port)
 const PORT = process.env.PORT || 5000
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
-})
+app.listen(PORT)
