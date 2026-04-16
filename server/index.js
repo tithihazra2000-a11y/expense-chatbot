@@ -25,7 +25,7 @@ app.get('/expenses', async (req, res) => {
     const { data, error } = await supabase
       .from('expenses')
       .select('*')
-      .order('id', { ascending: false })
+      .order('id', { ascending: true })
 
     if (error) {
       return res.json({ error: 'Error fetching data' })

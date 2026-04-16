@@ -1,54 +1,45 @@
-import { useState } from 'react'
-import Chat from './components/Chat'
-import Dashboard from './components/Dashboard'
-
+import { useState, useEffect } from "react"
+import Login from "./components/Login"
+import Dashboard from "./components/Dashboard"
+import Onboarding from "./components/Onboarding"
+ 
+export interface UserProfile {
+  name: string
+  email: string
+  currency: string
+  monthlyIncome: number
+  avatar: string
+}
+ 
 export default function App() {
-  const [user, setUser] = useState('')
-  const [name, setName] = useState('')
-
-  // LOGIN
-  if (!user) {
-    return (
-      <div style={{
-        height: '100vh',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        background: 'linear-gradient(135deg,#a18cd1,#fbc2eb)'
-      }}>
-        <div style={{ background: 'white', padding: 30, borderRadius: 10 }}>
-          <h2>Login</h2>
-
-          <input
-            placeholder="Enter your name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && name.trim()) {
-                setUser(name)
-              }
-            }}
-            style={{ padding: 8, marginRight: 8 }}
-          />
-
-          <button onClick={() => name.trim() && setUser(name)}>
-            Enter
-          </button>
-        </div>
-      </div>
-    )
+  const [user, setUser] = useState<string | null>(null)
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [onboarded, setOnboarded] = useState(false)
+ 
+  useEffect(() => {
+    const saved = localStorage.getItem("ss_profile")
+    const ob = localStorage.getItem("ss_onboarded")
+    if (saved) setProfile(JSON.parse(saved))
+    if (ob) setOnboarded(true)
+  }, [])
+ 
+  const handleLogin = (email: string) => {
+    setUser(email)
   }
-
-  // MAIN UI
-  return (
-    <div style={{ padding: 20 }}>
-      <h1>💰 Expense Tracker</h1>
-
-      <Chat />
-
-      <div style={{ marginTop: 20 }}>
-        <Dashboard />
-      </div>
-    </div>
-  )
+ 
+  const handleOnboardingComplete = (p: UserProfile) => {
+    setProfile(p)
+    localStorage.setItem("ss_profile", JSON.stringify(p))
+    localStorage.setItem("ss_onboarded", "true")
+    setOnboarded(true)
+  }
+ 
+  const handleProfileUpdate = (p: UserProfile) => {
+    setProfile(p)
+    localStorage.setItem("ss_profile", JSON.stringify(p))
+  }
+ 
+  if (!user) return <Login onLogin={handleLogin} />
+  if (!onboarded) return <Onboarding email={user} onComplete={handleOnboardingComplete} />
+  return <Dashboard profile={profile!} onProfileUpdate={handleProfileUpdate} />
 }
