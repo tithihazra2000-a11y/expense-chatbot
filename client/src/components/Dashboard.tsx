@@ -1,52 +1,109 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import Chat from "./Chat"
+import Profile from "./Profile"
+import BudgetManager from "./BudgetManager"
+import { useToasts, ToastContainer } from "./hooks/toast" 
+import type { UserProfile } from "../App" 
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend
+  BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from "recharts"
+    
  
-const COLORS = ["#8b5cf6", "#6366f1", "#ec4899", "#f59e0b", "#10b981", "#3b82f6", "#ef4444"]
- 
+const COLORS = ["#8b5cf6", "#6366f1", "#ec4899", "#f59e0b", "#10b981", "#3b82f6", "#ef4444", "#06b6d4"]
 const CATEGORY_ICONS: Record<string, string> = {
   food: "🍔", shopping: "🛍️", transport: "🚗", entertainment: "🎬",
   health: "💊", education: "📚", bills: "📄", other: "📦"
 }
+function getIcon(cat: string) { return CATEGORY_ICONS[(cat || "other").toLowerCase()] || "📦" }
+function capitalize(s: string) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : "" }
  
-function getIcon(cat: string) {
-  return CATEGORY_ICONS[cat?.toLowerCase()] || "📦"
+type Tab = "overview" | "expenses" | "chat" | "budget" | "profile"
+type Period = "week" | "month" | "all"
+ 
+const CURRENCIES: Record<string, string> = { INR: "₹", USD: "$", EUR: "€", GBP: "£" }
+ 
+interface Props {
+  profile: UserProfile
+  onProfileUpdate: (p: UserProfile) => void
 }
  
-type Tab = "overview" | "expenses" | "chat"
- 
-export default function Dashboard() {
+export default function Dashboard({ profile, onProfileUpdate }: Props) {
   const [expenses, setExpenses] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState<Tab>("overview")
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [deleteId, setDeleteId] = useState<number | null>(null)
+  const [period, setPeriod] = useState<Period>("month")
+  const [search, setSearch] = useState("")
+  const [filterCat, setFilterCat] = useState("all")
+  const [sortField, setSortField] = useState<"date" | "amount">("date")
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+  const [loading, setLoading] = useState(false)
+  const { toasts, addToast, addAlert } = useToasts()
  
-  const fetchExpenses = async () => {
+  const sym = CURRENCIES[profile.currency] || "₹"
+ 
+  const fetchExpenses = useCallback(async () => {
+    setLoading(true)
     try {
       const res = await fetch("https://expense-chatbot-api.onrender.com/expenses")
       const data = await res.json()
       setExpenses(data.reverse())
-    } catch (e) {
-      console.error(e)
-    }
-  }
+    } catch { addToast("Failed to fetch expenses", "error") }
+    finally { setLoading(false) }
+  }, [])
  
   useEffect(() => { fetchExpenses() }, [])
  
-  const total = expenses.reduce((s, e) => s + Number(e.amount), 0)
+  // Filter by period
+  const filterByPeriod = (list: any[]) => {
+    const now = new Date()
+    return list.filter(e => {
+      const d = new Date(e.created_at)
+      if (period === "week") {
+        const weekAgo = new Date(); weekAgo.setDate(now.getDate() - 7)
+        return d >= weekAgo
+      }
+      if (period === "month") {
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+      }
+      return true
+    })
+  }
+ 
+  const periodExpenses = filterByPeriod(expenses)
+ 
+  // Search + filter for expenses tab
+  const filteredExpenses = expenses
+    .filter(e => {
+      const matchSearch = search === "" ||
+        (e.category || "").toLowerCase().includes(search.toLowerCase()) ||
+        (e.note || "").toLowerCase().includes(search.toLowerCase())
+      const matchCat = filterCat === "all" || (e.category || "other").toLowerCase() === filterCat
+      return matchSearch && matchCat
+    })
+    .sort((a, b) => {
+      if (sortField === "amount") return sortDir === "desc" ? b.amount - a.amount : a.amount - b.amount
+      return sortDir === "desc"
+        ? new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        : new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    })
+ 
+  const total = periodExpenses.reduce((s, e) => s + Number(e.amount), 0)
+  const allTotal = expenses.reduce((s, e) => s + Number(e.amount), 0)
  
   // Category breakdown
   const categoryMap: Record<string, number> = {}
-  expenses.forEach(e => {
-    const cat = (e.category || "Other").toLowerCase()
+  periodExpenses.forEach(e => {
+    const cat = (e.category || "other").toLowerCase()
     categoryMap[cat] = (categoryMap[cat] || 0) + Number(e.amount)
   })
-  const pieData = Object.entries(categoryMap).map(([name, value]) => ({ name, value }))
+  const pieData = Object.entries(categoryMap)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
  
-  // Last 7 days bar
+  const topCat = pieData[0]
+ 
+  // Bar chart - last 7 days
   const last7: Record<string, number> = {}
   for (let i = 6; i >= 0; i--) {
     const d = new Date(); d.setDate(d.getDate() - i)
@@ -59,295 +116,336 @@ export default function Dashboard() {
   })
   const barData = Object.entries(last7).map(([day, amount]) => ({ day, amount }))
  
-  // Top category
-  const topCat = pieData.sort((a, b) => b.value - a.value)[0]
+  // Export CSV
+  const exportCSV = () => {
+    const rows = [["ID", "Amount", "Category", "Note", "Date"]]
+    filteredExpenses.forEach(e => rows.push([
+      e.id, e.amount, e.category || "other", e.note || "",
+      new Date(e.created_at).toLocaleDateString()
+    ]))
+    const csv = rows.map(r => r.join(",")).join("\n")
+    const blob = new Blob([csv], { type: "text/csv" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a"); a.href = url; a.download = "expenses.csv"; a.click()
+    URL.revokeObjectURL(url)
+    addToast("Expenses exported as CSV ✓", "success")
+  }
+ 
+  const uniqueCategories = [...new Set(expenses.map(e => (e.category || "other").toLowerCase()))]
+ 
+  const NAV = [
+    { id: "overview" as Tab, icon: "📊", label: "Overview" },
+    { id: "expenses" as Tab, icon: "📋", label: "Expenses" },
+    { id: "chat"     as Tab, icon: "💬", label: "Chat" },
+    { id: "budget"   as Tab, icon: "🎯", label: "Budgets" },
+    { id: "profile"  as Tab, icon: "👤", label: "Profile" },
+  ]
+ 
+  const toggleSort = (field: typeof sortField) => {
+    if (sortField === field) setSortDir(d => d === "asc" ? "desc" : "asc")
+    else { setSortField(field); setSortDir("desc") }
+  }
  
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#0f0c29", fontFamily: "inherit" }}>
+    <div style={{ display: "flex", minHeight: "100vh", background: "#0a0818", fontFamily: "'DM Sans', -apple-system, sans-serif" }}>
+ 
+      {/* Background glow */}
+      <div style={{ position: "fixed", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 0 }}>
+        <div style={{ position: "absolute", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(139,92,246,0.08) 0%, transparent 70%)", top: 0, left: "30%" }} />
+      </div>
  
       {/* SIDEBAR */}
       <aside style={{
-        width: sidebarOpen ? 240 : 72,
-        background: "rgba(255,255,255,0.04)",
-        borderRight: "1px solid rgba(255,255,255,0.08)",
+        width: sidebarOpen ? 220 : 64, flexShrink: 0,
+        background: "rgba(255,255,255,0.03)",
+        borderRight: "1px solid rgba(255,255,255,0.07)",
         display: "flex", flexDirection: "column",
-        padding: "24px 0", transition: "width 0.3s ease",
-        flexShrink: 0, overflow: "hidden"
+        padding: "20px 0", transition: "width 0.3s ease",
+        overflow: "hidden", position: "relative", zIndex: 1
       }}>
         {/* Logo */}
-        <div style={{ padding: "0 20px 28px", display: "flex", alignItems: "center", gap: 12, whiteSpace: "nowrap" }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+        <div style={{ padding: "0 16px 24px", display: "flex", alignItems: "center", gap: 10, whiteSpace: "nowrap" }}>
+          <div onClick={() => setSidebarOpen(o => !o)} style={{
+            width: 34, height: 34, borderRadius: 10, flexShrink: 0,
             background: "linear-gradient(135deg,#8b5cf6,#6366f1)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 18, cursor: "pointer"
-          }} onClick={() => setSidebarOpen(o => !o)}>₹</div>
-          {sidebarOpen && <span style={{ color: "white", fontWeight: 700, fontSize: 16, letterSpacing: "-0.5px" }}>SpendSmart</span>}
+            fontSize: 16, cursor: "pointer", userSelect: "none"
+          }}>{sym}</div>
+          {sidebarOpen && <span style={{ color: "white", fontWeight: 700, fontSize: 15, letterSpacing: "-0.3px" }}>SpendSmart</span>}
         </div>
  
-        {/* Nav */}
-        {([
-          { id: "overview", icon: "📊", label: "Overview" },
-          { id: "expenses", icon: "📋", label: "Expenses" },
-          { id: "chat", icon: "💬", label: "Chat" },
-        ] as { id: Tab; icon: string; label: string }[]).map(item => (
+        {NAV.map(item => (
           <button key={item.id} onClick={() => setActiveTab(item.id)} style={{
-            display: "flex", alignItems: "center", gap: 14,
-            padding: "12px 20px", border: "none", cursor: "pointer",
-            background: activeTab === item.id ? "rgba(139,92,246,0.2)" : "transparent",
+            display: "flex", alignItems: "center", gap: 12,
+            padding: sidebarOpen ? "11px 16px" : "11px 0",
+            justifyContent: sidebarOpen ? "flex-start" : "center",
+            border: "none", cursor: "pointer", transition: "all 0.15s",
+            background: activeTab === item.id ? "rgba(139,92,246,0.18)" : "transparent",
             borderLeft: activeTab === item.id ? "3px solid #8b5cf6" : "3px solid transparent",
-            color: activeTab === item.id ? "#c4b5fd" : "rgba(255,255,255,0.5)",
-            fontSize: 14, fontWeight: activeTab === item.id ? 600 : 400,
-            whiteSpace: "nowrap", textAlign: "left", transition: "all 0.15s"
+            color: activeTab === item.id ? "#c4b5fd" : "rgba(255,255,255,0.45)",
+            fontSize: 14, fontWeight: activeTab === item.id ? 600 : 400, whiteSpace: "nowrap"
           }}>
-            <span style={{ fontSize: 18, flexShrink: 0 }}>{item.icon}</span>
+            <span style={{ fontSize: 17, flexShrink: 0 }}>{item.icon}</span>
             {sidebarOpen && item.label}
           </button>
         ))}
  
         <div style={{ flex: 1 }} />
  
-        {/* User */}
-        <div style={{
-          margin: "0 12px", padding: "12px",
-          background: "rgba(255,255,255,0.06)",
-          borderRadius: 12, display: "flex", alignItems: "center", gap: 10
-        }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: "50%",
-            background: "linear-gradient(135deg,#ec4899,#8b5cf6)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "white", fontSize: 13, fontWeight: 700, flexShrink: 0
-          }}>U</div>
-          {sidebarOpen && (
-            <div style={{ overflow: "hidden" }}>
-              <p style={{ color: "white", fontSize: 13, fontWeight: 600, margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>User</p>
-              <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, margin: 0 }}>Free plan</p>
-            </div>
-          )}
+        {/* User chip */}
+        <div style={{ margin: "0 10px" }}>
+          <div onClick={() => setActiveTab("profile")} style={{
+            padding: sidebarOpen ? "10px 12px" : "10px 0",
+            background: "rgba(255,255,255,0.05)", borderRadius: 12,
+            display: "flex", alignItems: "center", gap: 10,
+            cursor: "pointer", justifyContent: sidebarOpen ? "flex-start" : "center"
+          }}>
+            <div style={{
+              width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+              background: "linear-gradient(135deg,#ec4899,#8b5cf6)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 16
+            }}>{profile.avatar}</div>
+            {sidebarOpen && (
+              <div style={{ overflow: "hidden", minWidth: 0 }}>
+                <p style={{ color: "white", fontSize: 13, fontWeight: 600, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profile.name}</p>
+                <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 11, margin: 0 }}>{profile.currency}</p>
+              </div>
+            )}
+          </div>
         </div>
       </aside>
  
       {/* MAIN */}
-      <main style={{ flex: 1, overflowY: "auto", padding: 28 }}>
+      <main style={{ flex: 1, overflowY: "auto", padding: "28px 32px", position: "relative", zIndex: 1 }}>
  
-        {/* Header */}
+        {/* Top bar */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
           <div>
-            <h1 style={{ color: "white", fontSize: 24, fontWeight: 700, margin: 0 }}>
-              {activeTab === "overview" ? "Overview" : activeTab === "expenses" ? "All Expenses" : "Chat"}
+            <h1 style={{ color: "white", fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: "-0.5px" }}>
+              {NAV.find(n => n.id === activeTab)?.label}
             </h1>
-            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 14, margin: "4px 0 0" }}>
-              {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+            <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 13, margin: "3px 0 0" }}>
+              {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}
             </p>
           </div>
-          <button onClick={fetchExpenses} style={{
-            padding: "9px 18px",
-            background: "rgba(139,92,246,0.15)",
-            border: "1px solid rgba(139,92,246,0.3)",
-            borderRadius: 10, color: "#c4b5fd",
-            fontSize: 13, cursor: "pointer", fontWeight: 500
-          }}>⟳ Refresh</button>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            {(activeTab === "overview") && (
+              <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: 3 }}>
+                {(["week", "month", "all"] as Period[]).map(p => (
+                  <button key={p} onClick={() => setPeriod(p)} style={{
+                    padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer",
+                    background: period === p ? "rgba(139,92,246,0.4)" : "transparent",
+                    color: period === p ? "white" : "rgba(255,255,255,0.4)",
+                    fontSize: 13, fontWeight: period === p ? 600 : 400, textTransform: "capitalize"
+                  }}>{p === "all" ? "All time" : `This ${p}`}</button>
+                ))}
+              </div>
+            )}
+            <button onClick={fetchExpenses} disabled={loading} style={{
+              padding: "8px 16px", background: "rgba(255,255,255,0.07)",
+              border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10,
+              color: "rgba(255,255,255,0.6)", fontSize: 13, cursor: "pointer"
+            }}>{loading ? "..." : "⟳"}</button>
+          </div>
         </div>
  
-        {/* ── OVERVIEW TAB ── */}
+        {/* ─── OVERVIEW ─── */}
         {activeTab === "overview" && (
           <>
             {/* Stat Cards */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 16, marginBottom: 24 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 22 }}>
               {[
-                { label: "Total Spent", value: `₹${total.toLocaleString("en-IN")}`, icon: "💸", color: "#8b5cf6" },
-                { label: "Transactions", value: expenses.length, icon: "📑", color: "#6366f1" },
-                { label: "Top Category", value: topCat ? topCat.name : "—", icon: getIcon(topCat?.name || ""), color: "#ec4899" },
-                { label: "Avg per Entry", value: expenses.length ? `₹${Math.round(total / expenses.length)}` : "₹0", icon: "📈", color: "#f59e0b" },
+                { label: "Total Spent", value: `${sym}${total.toLocaleString("en-IN")}`, icon: "💸", color: "#8b5cf6", sub: period === "all" ? "All time" : `This ${period}` },
+                { label: "Transactions", value: periodExpenses.length, icon: "📑", color: "#6366f1", sub: "entries" },
+                { label: "Top Category", value: topCat ? capitalize(topCat.name) : "—", icon: getIcon(topCat?.name || ""), color: "#ec4899", sub: topCat ? `${sym}${topCat.value.toLocaleString()}` : "" },
+                { label: "Avg per Day", value: period !== "all" && periodExpenses.length ? `${sym}${Math.round(total / (period === "week" ? 7 : 30))}` : "—", icon: "📈", color: "#f59e0b", sub: "daily avg" },
               ].map(card => (
                 <div key={card.label} style={{
                   background: "rgba(255,255,255,0.05)",
-                  border: "1px solid rgba(255,255,255,0.09)",
-                  borderRadius: 16, padding: "20px 20px",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 16, padding: "18px 18px"
                 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, margin: 0, fontWeight: 500, letterSpacing: "0.5px", textTransform: "uppercase" }}>{card.label}</p>
-                    <span style={{
-                      fontSize: 20, width: 36, height: 36, borderRadius: 10,
-                      background: `${card.color}22`,
-                      display: "flex", alignItems: "center", justifyContent: "center"
-                    }}>{card.icon}</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                    <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, margin: 0, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>{card.label}</p>
+                    <span style={{ fontSize: 18, width: 32, height: 32, borderRadius: 8, background: `${card.color}22`, display: "flex", alignItems: "center", justifyContent: "center" }}>{card.icon}</span>
                   </div>
-                  <p style={{ color: "white", fontSize: 24, fontWeight: 700, margin: "12px 0 0", letterSpacing: "-0.5px" }}>
-                    {card.value}
-                  </p>
+                  <p style={{ color: "white", fontSize: 22, fontWeight: 700, margin: "0 0 2px", letterSpacing: "-0.5px" }}>{card.value}</p>
+                  <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 12, margin: 0 }}>{card.sub}</p>
                 </div>
               ))}
             </div>
  
-            {/* Charts Row */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 }}>
- 
-              {/* Bar Chart */}
-              <div style={{
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.09)",
-                borderRadius: 16, padding: 20
-              }}>
-                <h3 style={{ color: "white", fontSize: 15, fontWeight: 600, margin: "0 0 20px" }}>Spending last 7 days</h3>
-                <ResponsiveContainer width="100%" height={200}>
+            {/* Charts */}
+            <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 18, marginBottom: 20 }}>
+              <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 20 }}>
+                <h3 style={{ color: "white", fontSize: 14, fontWeight: 600, margin: "0 0 18px" }}>Spending last 7 days</h3>
+                <ResponsiveContainer width="100%" height={190}>
                   <BarChart data={barData} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                    <XAxis dataKey="day" tick={{ fill: "rgba(255,255,255,0.4)", fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: "rgba(255,255,255,0.4)", fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <Tooltip
-                      contentStyle={{ background: "#1e1b4b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, color: "white" }}
-                      formatter={(v: any) => [`₹${v}`, "Spent"]}
-                    />
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="day" tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ background: "#1a1533", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, color: "white", fontSize: 13 }} formatter={(v: any) => [`${sym}${v}`, "Spent"]} />
                     <Bar dataKey="amount" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
  
-              {/* Pie Chart */}
-              <div style={{
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.09)",
-                borderRadius: 16, padding: 20
-              }}>
-                <h3 style={{ color: "white", fontSize: 15, fontWeight: 600, margin: "0 0 20px" }}>Category breakdown</h3>
+              <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 20 }}>
+                <h3 style={{ color: "white", fontSize: 14, fontWeight: 600, margin: "0 0 18px" }}>By category</h3>
                 {pieData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={200}>
-                    <PieChart>
-                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={85}
-                        paddingAngle={4} dataKey="value">
-                        {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{ background: "#1e1b4b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, color: "white" }}
-                        formatter={(v: any) => [`₹${v}`, ""]}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.3)", fontSize: 14 }}>
-                    No data yet
-                  </div>
-                )}
-                {/* Legend */}
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
-                  {pieData.slice(0, 4).map((d, i) => (
-                    <div key={d.name} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS[i % COLORS.length] }} />
-                      <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, textTransform: "capitalize" }}>{d.name}</span>
+                  <>
+                    <ResponsiveContainer width="100%" height={150}>
+                      <PieChart>
+                        <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={68} paddingAngle={4} dataKey="value">
+                          {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip contentStyle={{ background: "#1a1533", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, color: "white", fontSize: 13 }} formatter={(v: any) => [`${sym}${v}`, ""]} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                      {pieData.slice(0, 4).map((d, i) => (
+                        <div key={d.name} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                          <div style={{ width: 7, height: 7, borderRadius: "50%", background: COLORS[i % COLORS.length] }} />
+                          <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, textTransform: "capitalize" }}>{d.name}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </>
+                ) : (
+                  <div style={{ height: 150, display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.2)", fontSize: 13 }}>No data yet</div>
+                )}
               </div>
             </div>
  
-            {/* Recent Transactions */}
-            <div style={{
-              background: "rgba(255,255,255,0.05)",
-              border: "1px solid rgba(255,255,255,0.09)",
-              borderRadius: 16, padding: 20
-            }}>
+            {/* Recent transactions */}
+            <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 20 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h3 style={{ color: "white", fontSize: 15, fontWeight: 600, margin: 0 }}>Recent transactions</h3>
-                <button onClick={() => setActiveTab("expenses")} style={{
-                  background: "none", border: "none", color: "#a78bfa", fontSize: 13, cursor: "pointer"
-                }}>View all →</button>
+                <h3 style={{ color: "white", fontSize: 14, fontWeight: 600, margin: 0 }}>Recent transactions</h3>
+                <button onClick={() => setActiveTab("expenses")} style={{ background: "none", border: "none", color: "#a78bfa", fontSize: 13, cursor: "pointer" }}>View all →</button>
               </div>
-              {expenses.slice(0, 5).map(e => (
-                <div key={e.id} style={{
-                  display: "flex", alignItems: "center", gap: 14,
-                  padding: "10px 0",
-                  borderBottom: "1px solid rgba(255,255,255,0.06)"
-                }}>
-                  <div style={{
-                    width: 38, height: 38, borderRadius: 10,
-                    background: "rgba(139,92,246,0.2)",
-                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0
-                  }}>{getIcon(e.category)}</div>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ color: "white", fontSize: 14, fontWeight: 500, margin: 0, textTransform: "capitalize" }}>{e.category || "Other"}</p>
-                    <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 12, margin: 0 }}>{e.note || "—"}</p>
+              {periodExpenses.slice(0, 6).map(e => (
+                <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(139,92,246,0.18)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>{getIcon(e.category)}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ color: "white", fontSize: 13, fontWeight: 500, margin: 0, textTransform: "capitalize" }}>{e.category || "Other"}</p>
+                    <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.note || new Date(e.created_at).toLocaleDateString()}</p>
                   </div>
-                  <span style={{ color: "#ef4444", fontWeight: 600, fontSize: 14 }}>-₹{Number(e.amount).toLocaleString("en-IN")}</span>
+                  <span style={{ color: "#ef4444", fontWeight: 600, fontSize: 13, flexShrink: 0 }}>-{sym}{Number(e.amount).toLocaleString()}</span>
                 </div>
               ))}
-              {expenses.length === 0 && (
-                <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 14, textAlign: "center", padding: "20px 0" }}>
-                  No expenses yet. Start chatting!
-                </p>
+              {periodExpenses.length === 0 && (
+                <p style={{ color: "rgba(255,255,255,0.25)", fontSize: 13, textAlign: "center", padding: "24px 0", margin: 0 }}>No expenses for this period. Chat to add one!</p>
               )}
             </div>
           </>
         )}
  
-        {/* ── EXPENSES TAB ── */}
+        {/* ─── EXPENSES ─── */}
         {activeTab === "expenses" && (
-          <div style={{
-            background: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.09)",
-            borderRadius: 16, overflow: "hidden"
-          }}>
-            <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-              <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, margin: 0 }}>{expenses.length} total entries · ₹{total.toLocaleString("en-IN")} spent</p>
+          <>
+            {/* Search + Filter bar */}
+            <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+              <div style={{ position: "relative", flex: "1 1 220px" }}>
+                <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.35)", fontSize: 14 }}>🔍</span>
+                <input
+                  placeholder="Search by category or note..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  style={{ width: "100%", padding: "10px 12px 10px 36px", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }}
+                />
+              </div>
+              <select value={filterCat} onChange={e => setFilterCat(e.target.value)} style={{ padding: "10px 14px", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, color: "white", fontSize: 14, outline: "none", cursor: "pointer" }}>
+                <option value="all" style={{ background: "#1a1533" }}>All categories</option>
+                {uniqueCategories.map(c => <option key={c} value={c} style={{ background: "#1a1533", textTransform: "capitalize" }}>{capitalize(c)}</option>)}
+              </select>
+              <button onClick={exportCSV} style={{ padding: "10px 18px", background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 10, color: "#86efac", fontSize: 13, cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap" }}>
+                ⬇ Export CSV
+              </button>
             </div>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ background: "rgba(255,255,255,0.04)" }}>
-                    {["#", "Category", "Amount", "Note", "Date"].map(h => (
-                      <th key={h} style={{
-                        padding: "12px 16px", color: "rgba(255,255,255,0.4)",
-                        fontSize: 12, fontWeight: 600, letterSpacing: "0.5px",
-                        textAlign: "left", textTransform: "uppercase"
-                      }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {expenses.map((e, i) => (
-                    <tr key={e.id} style={{
-                      borderTop: "1px solid rgba(255,255,255,0.06)",
-                      transition: "background 0.15s",
-                      cursor: "default"
-                    }}
-                      onMouseEnter={ev => (ev.currentTarget.style.background = "rgba(255,255,255,0.04)")}
-                      onMouseLeave={ev => (ev.currentTarget.style.background = "transparent")}
-                    >
-                      <td style={{ padding: "12px 16px", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>{i + 1}</td>
-                      <td style={{ padding: "12px 16px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 16 }}>{getIcon(e.category)}</span>
-                          <span style={{ color: "white", fontSize: 14, textTransform: "capitalize" }}>{e.category || "Other"}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: "12px 16px", color: "#ef4444", fontWeight: 600, fontSize: 14 }}>
-                        -₹{Number(e.amount).toLocaleString("en-IN")}
-                      </td>
-                      <td style={{ padding: "12px 16px", color: "rgba(255,255,255,0.5)", fontSize: 13 }}>{e.note || "—"}</td>
-                      <td style={{ padding: "12px 16px", color: "rgba(255,255,255,0.35)", fontSize: 12 }}>
-                        {new Date(e.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
-                      </td>
+ 
+            <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, overflow: "hidden" }}>
+              <div style={{ padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>{filteredExpenses.length} results</span>
+                <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>Total: {sym}{filteredExpenses.reduce((s, e) => s + Number(e.amount), 0).toLocaleString()}</span>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+                      {["#", "Category", "Amount ↕", "Note", "Date ↕"].map((h, i) => (
+                        <th key={h} onClick={() => {
+                          if (h.includes("Amount")) toggleSort("amount")
+                          if (h.includes("Date")) toggleSort("date")
+                        }} style={{
+                          padding: "11px 16px", color: "rgba(255,255,255,0.35)",
+                          fontSize: 11, fontWeight: 600, letterSpacing: "0.5px",
+                          textAlign: "left", textTransform: "uppercase",
+                          cursor: (h.includes("Amount") || h.includes("Date")) ? "pointer" : "default"
+                        }}>{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              {expenses.length === 0 && (
-                <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 14, textAlign: "center", padding: "40px 0" }}>
-                  No expenses yet!
-                </p>
-              )}
+                  </thead>
+                  <tbody>
+                    {filteredExpenses.map((e, i) => (
+                      <tr key={e.id}
+                        style={{ borderTop: "1px solid rgba(255,255,255,0.05)", transition: "background 0.1s" }}
+                        onMouseEnter={ev => ev.currentTarget.style.background = "rgba(255,255,255,0.03)"}
+                        onMouseLeave={ev => ev.currentTarget.style.background = "transparent"}
+                      >
+                        <td style={{ padding: "11px 16px", color: "rgba(255,255,255,0.25)", fontSize: 12 }}>{i + 1}</td>
+                        <td style={{ padding: "11px 16px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 15 }}>{getIcon(e.category)}</span>
+                            <span style={{ color: "white", fontSize: 13, textTransform: "capitalize" }}>{e.category || "Other"}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: "11px 16px", color: "#ef4444", fontWeight: 600, fontSize: 13 }}>-{sym}{Number(e.amount).toLocaleString()}</td>
+                        <td style={{ padding: "11px 16px", color: "rgba(255,255,255,0.45)", fontSize: 12, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.note || "—"}</td>
+                        <td style={{ padding: "11px 16px", color: "rgba(255,255,255,0.3)", fontSize: 12 }}>
+                          {new Date(e.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {filteredExpenses.length === 0 && (
+                  <p style={{ color: "rgba(255,255,255,0.25)", fontSize: 14, textAlign: "center", padding: "36px 0", margin: 0 }}>No results found</p>
+                )}
+              </div>
             </div>
+          </>
+        )}
+ 
+        {/* ─── CHAT ─── */}
+        {activeTab === "chat" && (
+          <div style={{ height: "calc(100vh - 130px)" }}>
+            <Chat onNewExpense={() => { fetchExpenses(); addToast("Expense added!", "success") }} currencySymbol={sym} />
           </div>
         )}
  
-        {/* ── CHAT TAB ── */}
-        {activeTab === "chat" && (
-          <div style={{ height: "calc(100vh - 140px)" }}>
-            <Chat onNewExpense={fetchExpenses} />
-          </div>
+        {/* ─── BUDGET ─── */}
+        {activeTab === "budget" && (
+          <BudgetManager
+            expenses={expenses}
+            currency={profile.currency}
+            currencySymbol={sym}
+            onAlert={addAlert}
+          />
+        )}
+ 
+        {/* ─── PROFILE ─── */}
+        {activeTab === "profile" && (
+          <Profile
+            profile={profile}
+            onUpdate={onProfileUpdate}
+            totalExpenses={allTotal}
+            expenseCount={expenses.length}
+          />
         )}
       </main>
+ 
+      <ToastContainer toasts={toasts} />
     </div>
   )
 }

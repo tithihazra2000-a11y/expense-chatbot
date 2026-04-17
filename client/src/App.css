@@ -1,12 +1,5 @@
-/ App.tsx — drop this into client/src/App.tsx
-import { useState } from "react"
-import Login from "./components/Login"
-import Dashboard from "./components/Dashboard"
- 
-export default function App() {
-  const [user, setUser] = useState<string | null>(null)
- 
-  if (!user) return <Login onLogin={setUser} />
-  return <Dashboard />
+body {
+  margin: 0;
+  padding: 0;
+  font-family: sans-serif;
 }
- 

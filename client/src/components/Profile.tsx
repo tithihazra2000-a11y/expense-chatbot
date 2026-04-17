@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { UserProfile } from "../App"
+import type { UserProfile } from "../App" 
  
 const AVATARS = ["🦊", "🐼", "🦁", "🐸", "🦋", "🐬", "🦄", "🐙"]
 const CURRENCIES = [

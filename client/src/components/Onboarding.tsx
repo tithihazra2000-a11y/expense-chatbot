@@ -26,7 +26,14 @@ export default function Onboarding({ email, onComplete }: { email: string; onCom
   const curr = CURRENCIES.find(c => c.code === currency)!
  
   const finish = () => {
-    onComplete({ name: name || "User", email, currency, monthlyIncome: Number(income) || 0, avatar })
+    onComplete({
+      name: name || "User",
+      email,
+      currency,
+      monthlyIncome: Number(income) || 0,
+      monthlyBudget: Number(income) || 0,
+      avatar
+    })
   }
  
   return (
@@ -35,7 +42,6 @@ export default function Onboarding({ email, onComplete }: { email: string; onCom
       display: "flex", alignItems: "center", justifyContent: "center",
       fontFamily: "'DM Sans', sans-serif"
     }}>
-      {/* Background glow */}
       <div style={{ position: "fixed", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
         <div style={{ position: "absolute", width: 600, height: 600, borderRadius: "50%", background: "radial-gradient(circle, rgba(139,92,246,0.12) 0%, transparent 70%)", top: "10%", left: "20%" }} />
         <div style={{ position: "absolute", width: 400, height: 400, borderRadius: "50%", background: "radial-gradient(circle, rgba(99,102,241,0.1) 0%, transparent 70%)", bottom: "10%", right: "15%" }} />
@@ -43,7 +49,6 @@ export default function Onboarding({ email, onComplete }: { email: string; onCom
  
       <div style={{ position: "relative", zIndex: 1, width: "100%", maxWidth: 520, padding: "0 24px" }}>
  
-        {/* Progress */}
         <div style={{ display: "flex", gap: 8, marginBottom: 40, justifyContent: "center" }}>
           {steps.map((_, i) => (
             <div key={i} style={{
@@ -60,7 +65,6 @@ export default function Onboarding({ email, onComplete }: { email: string; onCom
           border: "1px solid rgba(255,255,255,0.1)",
           borderRadius: 24, padding: "40px 36px"
         }}>
-          {/* Step header */}
           <div style={{ textAlign: "center", marginBottom: 36 }}>
             <h2 style={{ color: "white", fontSize: 26, fontWeight: 700, margin: "0 0 8px", letterSpacing: "-0.5px" }}>
               {steps[step].title}
@@ -68,7 +72,6 @@ export default function Onboarding({ email, onComplete }: { email: string; onCom
             <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 15, margin: 0 }}>{steps[step].subtitle}</p>
           </div>
  
-          {/* Step 0: Name */}
           {step === 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <input
@@ -80,8 +83,7 @@ export default function Onboarding({ email, onComplete }: { email: string; onCom
                 style={{
                   padding: "14px 18px", background: "rgba(255,255,255,0.08)",
                   border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12,
-                  color: "white", fontSize: 16, outline: "none", textAlign: "center",
-                  letterSpacing: "0.3px"
+                  color: "white", fontSize: 16, outline: "none", textAlign: "center"
                 }}
               />
               <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, textAlign: "center", margin: 0 }}>
@@ -90,7 +92,6 @@ export default function Onboarding({ email, onComplete }: { email: string; onCom
             </div>
           )}
  
-          {/* Step 1: Avatar */}
           {step === 1 && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
               {AVATARS.map(a => (
@@ -105,7 +106,6 @@ export default function Onboarding({ email, onComplete }: { email: string; onCom
             </div>
           )}
  
-          {/* Step 2: Currency + Income */}
           {step === 2 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
               <div>
@@ -147,7 +147,6 @@ export default function Onboarding({ email, onComplete }: { email: string; onCom
             </div>
           )}
  
-          {/* Step 3: Done */}
           {step === 3 && (
             <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: 72, marginBottom: 20 }}>{avatar}</div>
@@ -168,7 +167,6 @@ export default function Onboarding({ email, onComplete }: { email: string; onCom
             </div>
           )}
  
-          {/* Buttons */}
           <div style={{ display: "flex", gap: 12, marginTop: 32 }}>
             {step > 0 && step < 3 && (
               <button onClick={() => setStep(s => s - 1)} style={{

@@ -1,6 +1,4 @@
-// ── FILE 1: public/manifest.json ──────────────────────────────────────────────
-// Place this in your client/public/ folder
- 
+
 {
   "name": "SpendSmart - Expense Tracker",
   "short_name": "SpendSmart",

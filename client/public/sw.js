@@ -1,6 +1,3 @@
-// ── FILE 2: public/sw.js ───────────────────────────────────────────────────────
-// Place this in your client/public/ folder
- 
 const CACHE_NAME = "spendsmart-v1";
 const STATIC_ASSETS = ["/", "/index.html"];
  
